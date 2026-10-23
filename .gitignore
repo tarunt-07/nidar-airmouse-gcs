@@ -1,0 +1,38 @@
+# The repo lives inside the Windows home directory, so track ONLY the GCS
+# project and ignore every other root entry.
+/*
+!/.gitignore
+!/README.md
+!/AGENTS.md
+!/run.py
+!/requirements.txt
+!/config.json
+!/backend/
+!/frontend/
+!/docs/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+.pytest_cache/
+.mypy_cache/
+
+# Node / frontend build output
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# Local runtime data (mission recordings, generated reports)
+logs/
+*.log
+.env
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
