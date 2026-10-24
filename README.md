@@ -27,8 +27,10 @@ the drone and visualised live.
 - **Mission clock** — large timer with a remaining-time ring, survivor pips and an
   explored-percentage bar.
 - **Event log** — timestamped info/warn/crit events from the drone.
-- **Automatic debrief** — on `EXITED` / `ABORTED` the final map PNG and a JSON
-  report are POSTed to `/api/report` with no operator input.
+- **Automatic debrief** — on `EXITED` / `ABORTED` / `FAILSAFE` the final map PNG
+  and a JSON report are POSTed to `/api/report` with no operator input.
+- **Recoverable demo runs** — a simulator-only **RESET SIM** control returns
+  `ABORTED` / `EXITED` / `FAILSAFE` to `READY` without restarting the server.
 - **100% offline** — fonts are bundled via `@fontsource`, textures are inline
   CSS/SVG, no CDN, no tiles, no external APIs.
 
@@ -63,6 +65,21 @@ python run.py --sim --fail link   # inject a link-loss failsafe
                                   #   choices: link | battery | geofence
 python run.py --host 0.0.0.0 --port 8000
 ```
+
+### Re-running a mission (simulator only)
+
+When a run ends in `ABORTED`, `EXITED` or `FAILSAFE`, the debrief overlay shows
+**RESET SIM**. It returns the simulator to `READY`, resets the map, survivors
+and event log, and lets you launch again without restarting the server.
+
+The reset is a **simulator-only demo control**:
+
+- it exists only with `python run.py --sim`;
+- the backend refuses it unless the ingest client identified itself as the
+  simulator;
+- it is refused while the drone is airborne (`EXPLORING` / `RETURNING`) — abort
+  first;
+- real drone hardware still receives only `START` and `ABORT`.
 
 ### Frontend development
 
@@ -102,6 +119,8 @@ the contract messages and listens for the two commands.
 run.py                  launcher (backend + optional simulator)
 config.json             arena, cell size, timings, video URL
 requirements.txt
+LICENSE                 proprietary license (all rights reserved)
+SECURITY.md             security policy + deployment hardening
 backend/
   app/main.py           FastAPI: /ingest, /ws, /api/*, static SPA
   sim/run.py            drone simulator state machine, motion, sensors
@@ -148,6 +167,10 @@ GCS → drone (the only two commands that exist):
 {"cmd": "ABORT"}
 ```
 
+A real drone receives only those two commands. The simulator additionally
+accepts a `RESET` control used by the debrief button; the backend sends it only
+in `--sim` mode after a simulator `hello` handshake, and never to real hardware.
+
 ### Coordinates and cell labels
 
 Arena frame in metres: `(0,0)` is the bottom-left, `+x` right, `+y` up, yaw CCW
@@ -190,9 +213,22 @@ so a survivor at `(4.2, 1.3)` with `cell_size_m = 1.0` is `E2`.
   no map editing.
 - START requires a 1.5 s press-and-hold and is enabled only in `READY`.
 - ABORT is available while the drone is airborne.
+- The debrief **RESET SIM** control is simulator-only and never sent to real
+  hardware.
 - Everything on screen is produced live from the drone stream; the debrief is
   generated automatically at the end of the mission.
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for the reporting process, the local-only
+security model, and the deployment hardening checklist. In short: run offline,
+keep the default `127.0.0.1` bind unless the drone needs a LAN, isolate the
+drone access point, and never expose `/ingest` or `/ws` to the internet.
+
 ## License
 
-Internal competition project — add a license before distributing.
+**Proprietary — All Rights Reserved.** See [LICENSE](LICENSE).
+
+The GCS is provided for personal, educational, and competition-judging use
+only. No commercial use, redistribution, or derivative works without written
+permission. It is **not** certified for safety-critical or live rescue flight.

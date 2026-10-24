@@ -94,6 +94,7 @@ class Sim:
         self.found: set[int] = set()
         self.plan: list[list[float]] = []
         self.trail: list[list[float]] = [[self.x, self.y]]
+        self.force_emit = False
 
         self.cmd_queue: asyncio.Queue[str] = asyncio.Queue()
         self.events_out: list[dict] = []
@@ -130,13 +131,19 @@ class Sim:
                 except json.JSONDecodeError:
                     continue
                 cmd = msg.get("cmd") if isinstance(msg, dict) else None
-                if cmd in ("START", "ABORT"):
+                if cmd in ("START", "ABORT", "RESET"):
                     await self.cmd_queue.put(cmd)
         except websockets.ConnectionClosed:
             return
 
     # ------------------------------------------------------------------ #
     def on_command(self, cmd: str) -> None:
+        if cmd == "RESET":
+            # Simulator-only demo control. Refused mid-flight: ABORT first.
+            if self.state in ("IDLE", "READY", "ABORTED", "EXITED", "FAILSAFE"):
+                self._reset_mission()
+                print("[sim] RESET received -> READY")
+            return
         if cmd == "START":
             if self.state in ("IDLE", "READY"):
                 self.state = "EXPLORING"
@@ -157,9 +164,46 @@ class Sim:
                 print("[sim] ABORT received -> ABORTED")
 
     # ------------------------------------------------------------------ #
+    def _reset_mission(self) -> None:
+        """Return to READY and wipe every trace of the previous run."""
+        self.known = KnownMap(self.arena)
+        self.explorer = Explorer(self.arena, self.known)
+        self.x, self.y = self.arena.entry
+        self.yaw = math.radians(90.0)
+        self.speed = 0.0
+        self.alt = 0.8
+        self.batt_pct = 100.0
+        self.state = "READY"
+        self.start_time = None
+        self.elapsed = 0.0
+        self.distance_m = 0.0
+        self.preflight_ok = True
+        self.failsafe = FailsafeState()
+        self.found.clear()
+        self.plan = []
+        self.trail = [[self.x, self.y]]
+        # Seed the fresh map with one entry scan. Without this the explorer
+        # sees an all-unknown grid and immediately declares exploration done.
+        self._lidar()
+        self.acc = {k: 0.0 for k in
+                    ("telemetry", "mission", "map", "path", "failsafe", "preflight")}
+        self.acc_lidar = 0.0
+        self.acc_replan = 0.0
+        self.acc_camera = 0.0
+        self.last_mission_key = None
+        self.force_emit = True
+        self._queue_event("info", "simulation reset - ready for a new run")
+
+    # ------------------------------------------------------------------ #
     def _drain_commands(self) -> None:
         while not self.cmd_queue.empty():
-            self.on_command(self.cmd_queue.get_nowait())
+            cmd = self.cmd_queue.get_nowait()
+            self.on_command(cmd)
+            # Let the READY burst go out before a START that arrived in the
+            # same tick. Otherwise the backend would see EXPLORING instead of
+            # READY and never complete the pending reset.
+            if cmd == "RESET":
+                break
 
     # ------------------------------------------------------------------ #
     def _update_battery(self, dt: float, now: float) -> None:
@@ -194,6 +238,25 @@ class Sim:
                 fs.low_battery = True
             elif self.args.fail == "geofence":
                 fs.geofence = True
+
+        # A real failsafe stops the mission. The dashboard shows the FAILSAFE
+        # debrief and the simulator can then be reset for another run.
+        if self.state in ("EXPLORING", "RETURNING"):
+            reason = None
+            if fs.link_loss:
+                reason = "link loss"
+            elif fs.low_battery:
+                reason = "low battery"
+            elif fs.geofence:
+                reason = "geofence breach"
+            elif fs.recall:
+                reason = "recall / flight-time limit"
+            if reason:
+                self.state = "FAILSAFE"
+                self.speed = 0.0
+                self.plan = []
+                self._queue_event("crit", f"failsafe triggered - {reason}")
+                print(f"[sim] failsafe ({reason}) -> FAILSAFE")
 
     # ------------------------------------------------------------------ #
     def _lidar(self) -> None:
@@ -294,6 +357,10 @@ class Sim:
                 self.trail = self.trail[-4000:]
 
     def _detect_survivors(self) -> list[dict]:
+        # Only search while the mission is active; READY/PREFLIGHT should not
+        # pre-populate survivor cards before the operator presses START.
+        if self.state not in ("EXPLORING", "RETURNING", "FAILSAFE"):
+            return []
         new: list[dict] = []
         for s in self.arena.survivors:
             if s["id"] in self.found:
@@ -372,6 +439,17 @@ class Sim:
     async def step(self, dt: float) -> None:
         now = time.time()
         self._drain_commands()
+
+        if self.force_emit:
+            self.force_emit = False
+            # READY first: the backend uses it to finish a pending reset.
+            await self.send(self._mission())
+            await self.send(self._telemetry())
+            await self.send(self.known.to_message())
+            await self.send(self._path())
+            await self.send({"type": "failsafe", **self.failsafe.as_dict()})
+            await self.send(self._preflight())
+
         await self._emit_events(now)
 
         if self.state == "IDLE":
@@ -476,6 +554,7 @@ async def main_async(args: argparse.Namespace) -> None:
 
     ws = await _connect(args.backend)
     sim.ws = ws
+    await ws.send(json.dumps({"type": "hello", "role": "simulator"}))
     print(f"[sim] connected to {args.backend}")
     recv = asyncio.create_task(sim.recv_loop())
     try:

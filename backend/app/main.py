@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,14 @@ def load_config() -> dict[str, Any]:
 
 
 CONFIG = load_config()
+
+# Set by run.py --sim. The reset endpoint is a simulator-only convenience and
+# is never offered to (or honoured for) real drone hardware.
+SIM_MODE = os.environ.get("NIDAR_SIM") == "1"
+
+# States from which a simulator reset is safe. EXPLORING/RETURNING must be
+# aborted first; PREFLIGHT is left alone.
+RESETTABLE_STATES = {"IDLE", "READY", "EXITED", "ABORTED", "FAILSAFE"}
 
 
 # --------------------------------------------------------------------------- #
@@ -199,20 +208,26 @@ class MissionLogger:
 class Hub:
     def __init__(self) -> None:
         self.ingest_ws: Optional[WebSocket] = None
+        self.ingest_is_sim: bool = False
         self.clients: set[WebSocket] = set()
         self.latest: dict[str, dict] = {}
         self.survivors: dict[int, dict] = {}
         self.last_ingest_ts: float = 0.0
         self.link_ok: bool = True
+        self.reset_pending: bool = False
+        self.reset_started: float = 0.0
         self.logger = MissionLogger()
 
     # -- ingest ----------------------------------------------------------- #
     async def attach_ingest(self, ws: WebSocket) -> None:
         self.ingest_ws = ws
+        self.ingest_is_sim = False
 
     def detach_ingest(self, ws: WebSocket) -> None:
         if self.ingest_ws is ws:
             self.ingest_ws = None
+            self.ingest_is_sim = False
+            self.reset_pending = False
 
     def ingest_connected(self) -> bool:
         return self.ingest_ws is not None
@@ -223,6 +238,23 @@ class Hub:
             return False
         await ws.send_text(json.dumps({"cmd": cmd}))
         return True
+
+    async def request_reset(self) -> tuple[bool, str]:
+        """Ask the simulator to return to READY. Never used for real hardware."""
+        if not SIM_MODE:
+            return False, "reset is only available in simulator mode"
+        if self.ingest_ws is None:
+            return False, "simulator not connected"
+        if not self.ingest_is_sim:
+            return False, "ingest client is not a simulator"
+        state = (self.latest.get("mission") or {}).get("state")
+        if state not in RESETTABLE_STATES:
+            return False, "abort the mission before resetting"
+        self.reset_pending = True
+        self.reset_started = time.time()
+        self.logger.log("cmd", "RESET", {"cmd": "RESET"})
+        await self.forward_command("RESET")
+        return True, ""
 
     # -- dashboard clients ------------------------------------------------ #
     def add_client(self, ws: WebSocket) -> None:
@@ -263,6 +295,13 @@ class Hub:
             self.logger.log("in", "invalid", raw[:512])
             return
         mtype = msg.get("type")
+        if mtype == "hello":
+            # Only the simulator sends this. Real drone hardware never does,
+            # so the reset path can never target real hardware.
+            self.ingest_is_sim = msg.get("role") == "simulator"
+            self.logger.log("in", "hello", msg)
+            print(f"[ingest] client role: {'simulator' if self.ingest_is_sim else 'drone'}")
+            return
         model = MODEL_FOR_TYPE.get(mtype)
         if model is None:
             self.logger.log("in", "unknown", msg)
@@ -274,6 +313,20 @@ class Hub:
             print(f"[ingest] rejected {mtype}: {exc.errors()[:1]}")
             return
         payload = validated.model_dump()
+        if self.reset_pending:
+            if mtype == "mission" and payload["state"] in ("IDLE", "READY"):
+                # The simulator is back at READY: drop everything from the old
+                # run, tell the dashboard to clear, then seed the fresh state.
+                self.reset_pending = False
+                self.latest.clear()
+                self.survivors.clear()
+                self.latest[mtype] = payload
+                self.logger.log("in", mtype, payload)
+                await self.broadcast({"type": "reset"})
+                await self.broadcast(payload)
+                return
+            # Ignore stale ABORTED/FAILSAFE frames while the reset is in flight.
+            return
         if mtype == "survivor":
             self.survivors[payload["id"]] = payload
         else:
@@ -290,6 +343,11 @@ class Hub:
                 self.link_ok = False
                 print("[watchdog] ingest link lost")
                 await self.broadcast({"type": "gcs_link", "ok": False})
+            if self.reset_pending and time.time() - self.reset_started > 6.0:
+                self.reset_pending = False
+                print("[watchdog] simulator reset timed out")
+                await self.broadcast({"type": "event", "level": "warn",
+                                      "msg": "simulator reset timed out"})
 
 
 hub = Hub()
@@ -299,6 +357,16 @@ hub = Hub()
 # App
 # --------------------------------------------------------------------------- #
 app = FastAPI(title="NIDAR AirMouse GCS")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 
 @app.on_event("startup")
@@ -366,7 +434,7 @@ async def dashboard(ws: WebSocket) -> None:
 
 @app.get("/api/config")
 async def api_config() -> JSONResponse:
-    return JSONResponse(CONFIG)
+    return JSONResponse({**CONFIG, "sim_mode": SIM_MODE})
 
 
 @app.get("/api/health")
@@ -376,8 +444,20 @@ async def api_health() -> JSONResponse:
         age = int((time.time() - hub.last_ingest_ts) * 1000)
     return JSONResponse({
         "ingest_connected": hub.ingest_connected(),
+        "ingest_is_sim": hub.ingest_is_sim,
+        "sim_mode": SIM_MODE,
+        "reset_pending": hub.reset_pending,
         "last_msg_age_ms": age,
     })
+
+
+@app.post("/api/reset")
+async def api_reset() -> JSONResponse:
+    """Simulator-only: return to READY and clear the dashboard for a new run."""
+    ok, detail = await hub.request_reset()
+    if not ok:
+        return JSONResponse({"detail": detail}, status_code=403 if not SIM_MODE else 409)
+    return JSONResponse({"ok": True, "pending": True})
 
 
 _LOG_NAME = re.compile(r"^[A-Za-z0-9._-]+\.jsonl$")

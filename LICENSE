@@ -1,0 +1,86 @@
+PROPRIETARY SOFTWARE LICENSE — ALL RIGHTS RESERVED
+
+Copyright (c) 2026 Tarun Kumar (tarunt-07). All rights reserved.
+
+This software, including its source code, object code, documentation, designs,
+schematics, configuration, and any associated materials (collectively, the
+"Software"), is proprietary and confidential. No license, right, or interest
+in the Software is granted except as expressly stated in this License.
+
+1. LIMITED EVALUATION LICENSE
+
+   Subject to your compliance with this License, the copyright holder grants
+   you a limited, revocable, non-exclusive, non-transferable, royalty-free
+   license to:
+
+   (a) view and review the Software for personal, educational, or
+       competition-judging purposes; and
+   (b) run the Software locally, in source or built form, for those purposes.
+
+   No other rights are granted, whether by implication, estoppel, or
+   otherwise.
+
+2. RESTRICTIONS
+
+   You may not, without the prior written permission of the copyright holder:
+
+   (a) copy, reproduce, distribute, publish, sublicense, sell, rent, lease,
+       lend, or otherwise make the Software available to any third party;
+   (b) modify, adapt, translate, reverse engineer, decompile, disassemble,
+       or create derivative works of the Software, except to the extent that
+       such a restriction is prohibited by applicable law;
+   (c) use the Software, in whole or in part, in a commercial product, paid
+       service, production system, or any revenue-generating activity;
+   (d) remove, obscure, or alter any copyright, trademark, attribution, or
+       proprietary notice contained in the Software;
+   (e) use the name, logo, or trademarks of the copyright holder, or the
+       NIDAR competition, in any way that suggests sponsorship, endorsement,
+       or affiliation without written permission; or
+   (f) use the Software in any safety-critical, life-critical, weapons, or
+       live autonomous-flight application without independent certification
+       and the copyright holder's written permission.
+
+3. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+   NON-INFRINGEMENT. THE COPYRIGHT HOLDER DOES NOT WARRANT THAT THE SOFTWARE
+   IS ERROR-FREE, SECURE, ACCURATE, OR SUITABLE FOR ANY PARTICULAR PURPOSE.
+   YOU BEAR THE ENTIRE RISK OF USING THE SOFTWARE.
+
+4. LIMITATION OF LIABILITY
+
+   TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT
+   OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+5. NO PATENT OR TRADEMARK LICENSE
+
+   No patent license, trademark license, trade-secret license, or other
+   intellectual-property license is granted by implication, estoppel, or
+   otherwise. All rights not expressly granted are reserved.
+
+6. TERMINATION
+
+   This License terminates automatically, without notice, if you breach any
+   of its terms. Upon termination, you must immediately stop using the
+   Software and destroy all copies in your possession or control. Sections
+   2 through 8 survive termination.
+
+7. GOVERNING LAW AND JURISDICTION
+
+   This License is governed by the laws of India, without regard to its
+   conflict-of-law rules. Any dispute arising out of or relating to this
+   License or the Software shall be subject to the exclusive jurisdiction of
+   the courts of Chennai, Tamil Nadu, India.
+
+8. CONTACT
+
+   For licensing, commercial, competition, or security inquiries:
+
+   Tarun Kumar
+   tarunjan2007@gmail.com
+   https://github.com/tarunt-07

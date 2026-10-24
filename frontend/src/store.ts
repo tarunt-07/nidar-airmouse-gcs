@@ -30,6 +30,7 @@ export const FALLBACK_CONFIG: Config = {
   setup_s: 300,
   video_url: 'http://localhost:8081/stream',
   map_res_m: 0.1,
+  sim_mode: false,
 }
 
 const NO_FAILSAFE: Failsafe = {
@@ -146,6 +147,10 @@ export const useStore = create<State>((set, get) => ({
         break
       case 'event':
         get().pushEvent({ level: msg.level, msg: msg.msg })
+        break
+      case 'reset':
+        get().resetMission()
+        get().pushEvent({ level: 'info', msg: 'simulation reset — ready for a new run' })
         break
       case 'survivor': {
         const st = get()

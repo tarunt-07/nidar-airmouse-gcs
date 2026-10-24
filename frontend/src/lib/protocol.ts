@@ -109,6 +109,10 @@ export interface GcsLink {
   ok: boolean
 }
 
+export interface ResetMsg {
+  type: 'reset'
+}
+
 export interface Config {
   cell_size_m: number
   arena_w_m: number
@@ -118,6 +122,7 @@ export interface Config {
   setup_s: number
   video_url: string
   map_res_m: number
+  sim_mode?: boolean
 }
 
 export interface MapState {
@@ -139,5 +144,6 @@ export type ServerMessage =
   | Preflight
   | EventMsg
   | GcsLink
+  | ResetMsg
 
 export type Command = 'START' | 'ABORT'

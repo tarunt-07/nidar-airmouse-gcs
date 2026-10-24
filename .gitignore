@@ -4,6 +4,8 @@
 !/.gitignore
 !/README.md
 !/AGENTS.md
+!/LICENSE
+!/SECURITY.md
 !/run.py
 !/requirements.txt
 !/config.json

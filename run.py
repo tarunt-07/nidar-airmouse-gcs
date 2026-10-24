@@ -28,6 +28,10 @@ def main() -> None:
     ap.add_argument("--fail", choices=["link", "battery", "geofence"], default=None)
     args = ap.parse_args()
 
+    # The backend exposes POST /api/reset only in simulator mode.
+    if args.sim:
+        os.environ["NIDAR_SIM"] = "1"
+
     os.chdir(ROOT)
     sys.path.insert(0, str(BACKEND))
 

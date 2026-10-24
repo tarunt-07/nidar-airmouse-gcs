@@ -142,7 +142,7 @@ export default function ControlBar() {
         </button>
       </div>
       <div className="micro text-center text-[9px] tracking-[0.16em]">
-        {canStart ? 'all systems go — hold START to launch' : 'operator commands: START / ABORT only'}
+        {canStart ? 'all systems go — hold START to launch' : 'flight commands: START / ABORT only'}
       </div>
     </div>
   )
