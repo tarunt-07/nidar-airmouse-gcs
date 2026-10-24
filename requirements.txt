@@ -4,3 +4,4 @@ websockets>=12.0
 numpy>=1.26
 pillow>=10.0
 pydantic>=2.6
+reportlab>=4.0

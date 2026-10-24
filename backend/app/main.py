@@ -501,18 +501,74 @@ async def api_report(request: Request) -> JSONResponse:
         json.dump(report, fh, indent=2, default=str)
     saved.append(json_path.name)
 
+    map_bytes: bytes | None = None
     if isinstance(png, str) and png.startswith("data:image"):
         try:
             _, b64 = png.split(",", 1)
-            raw = base64.b64decode(b64)
+            map_bytes = base64.b64decode(b64)
             png_path = LOGS_DIR / f"mission-map-{stamp}.png"
-            png_path.write_bytes(raw)
+            png_path.write_bytes(map_bytes)
             saved.append(png_path.name)
         except Exception as exc:  # pragma: no cover - defensive
             print(f"[report] png save failed: {exc!r}")
+            map_bytes = None
+
+    # Printable debrief so the operator can download a PDF from the dashboard.
+    try:
+        from . import report_pdf  # reportlab is only needed here
+
+        pdf_path = LOGS_DIR / f"mission-report-{stamp}.pdf"
+        pdf_path.write_bytes(
+            report_pdf.build_debrief_pdf(
+                report if isinstance(report, dict) else {}, map_bytes
+            )
+        )
+        saved.append(pdf_path.name)
+    except Exception as exc:
+        # A rendering hiccup must never lose the JSON/PNG report.
+        print(f"[report] pdf render failed: {exc!r}")
 
     print(f"[report] saved {', '.join(saved)}")
     return JSONResponse({"ok": True, "saved": saved})
+
+
+def _latest_report_file(prefix: str, suffix: str) -> Optional[Path]:
+    """Newest matching artefact in logs/ (stamps sort chronologically)."""
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    matches = sorted(
+        LOGS_DIR.glob(f"{prefix}*{suffix}"),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    return matches[0] if matches else None
+
+
+def _download(path: Optional[Path], media_type: str, what: str) -> FileResponse | JSONResponse:
+    if path is None or not path.is_file():
+        return JSONResponse({"detail": f"no {what} saved yet"}, status_code=404)
+    # ``filename=`` makes FastAPI send Content-Disposition: attachment.
+    return FileResponse(str(path), media_type=media_type, filename=path.name)
+
+
+@app.get("/api/report/pdf", response_model=None)
+async def api_report_pdf() -> FileResponse | JSONResponse:
+    """Download the newest mission debrief as a PDF."""
+    return _download(_latest_report_file("mission-report-", ".pdf"),
+                     "application/pdf", "PDF report")
+
+
+@app.get("/api/report/json", response_model=None)
+async def api_report_json() -> FileResponse | JSONResponse:
+    """Download the newest mission report JSON."""
+    return _download(_latest_report_file("mission-report-", ".json"),
+                     "application/json", "JSON report")
+
+
+@app.get("/api/report/map", response_model=None)
+async def api_report_map() -> FileResponse | JSONResponse:
+    """Download the final occupancy map PNG."""
+    return _download(_latest_report_file("mission-map-", ".png"),
+                     "image/png", "map image")
 
 
 if FRONTEND_DIST.exists():

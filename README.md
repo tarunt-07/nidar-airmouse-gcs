@@ -27,33 +27,91 @@ the drone and visualised live.
 - **Mission clock** — large timer with a remaining-time ring, survivor pips and an
   explored-percentage bar.
 - **Event log** — timestamped info/warn/crit events from the drone.
-- **Automatic debrief** — on `EXITED` / `ABORTED` / `FAILSAFE` the final map PNG
-  and a JSON report are POSTed to `/api/report` with no operator input.
+- **Automatic debrief** — on `EXITED` / `ABORTED` / `FAILSAFE` the final map PNG,
+  a JSON report **and a printable PDF** are written to `logs/`, and the debrief
+  overlay offers one-click **PDF / JSON / Map PNG** downloads.
 - **Recoverable demo runs** — a simulator-only **RESET SIM** control returns
   `ABORTED` / `EXITED` / `FAILSAFE` to `READY` without restarting the server.
 - **100% offline** — fonts are bundled via `@fontsource`, textures are inline
-  CSS/SVG, no CDN, no tiles, no external APIs.
+  CSS/SVG, no CDN, no tiles, no external APIs. The PDF debrief is rendered
+  locally with `reportlab`.
+
+---
 
 ## Quick start
 
-Requirements: **Python 3.11+** and **Node 18+** (Node is only needed to build the
-dashboard once).
+Anyone can go from clone to a flying simulation in about five minutes.
+
+### 0. Prerequisites
+
+| Tool | Version | Check with |
+| --- | --- | --- |
+| Python | 3.11+ | `python --version` (Windows: `py -3 --version`) |
+| Node.js | 18+ | `node --version` |
+| npm | ships with Node | `npm --version` |
+
+Internet is needed **once**, to download the Python/Node packages. Everything
+after that runs fully offline.
+
+### 1. Clone
 
 ```bash
+git clone https://github.com/tarunt-07/nidar-airmouse-gcs.git
+cd nidar-airmouse-gcs
+```
+
+### 2. Backend (Python)
+
+Windows (PowerShell / CMD):
+
+```bat
+python -m venv .venv
+.venv\Scripts\activate
 python -m pip install -r requirements.txt
+```
 
-# build the dashboard (outputs frontend/dist, served by FastAPI)
+macOS / Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+> Skip the virtualenv and `pip install -r requirements.txt` globally if you
+> prefer — it works either way. The dependencies are `fastapi`, `uvicorn`,
+> `websockets`, `numpy`, `pillow`, `pydantic` and `reportlab`.
+
+### 3. Dashboard (Node)
+
+```bash
 cd frontend
-npm install
-npm run build
+npm install          # or: npm ci  (exact lockfile install)
+npm run build        # type-checks (tsc) and outputs frontend/dist
 cd ..
+```
 
-# backend + drone simulator
+> `frontend/dist` is what FastAPI serves. You only need this build once; rerun
+> it after changing frontend code.
+
+### 4. Run it
+
+```bash
+# backend + drone simulator (recommended first run)
 python run.py --sim --speed 4
 ```
 
-Open <http://127.0.0.1:8000>. The simulator reaches `READY` after ~3 s; **press and
-hold START for 1.5 s** to launch.
+Then open **<http://127.0.0.1:8000>**.
+
+What you should see:
+
+1. The pre-flight screen with **LINK / VIDEO / MAP / BATTERY** checks turning
+   green after ~3 s (the simulator says `READY`).
+2. **Press and hold START for 1.5 s** — the drone begins exploring, the map,
+   camera, survivor cards and event log update live.
+3. When the mission ends (`EXITED`, `ABORTED` or `FAILSAFE`) the debrief
+   overlay opens, the report auto-saves to `logs/`, and the **DOWNLOAD
+   DEBRIEF** buttons (PDF / JSON / Map PNG) become your copy of the run.
 
 ### Launcher options
 
@@ -81,12 +139,56 @@ The reset is a **simulator-only demo control**:
   first;
 - real drone hardware still receives only `START` and `ABORT`.
 
-### Frontend development
+### Frontend development (hot reload)
 
 ```bash
+# terminal 1
+python run.py --sim
+# terminal 2
 cd frontend
-npm run dev        # Vite dev server, proxies /ws and /api to :8000
+npm run dev        # Vite dev server on :5173, proxies /ws, /ingest and /api to :8000
 ```
+
+### Verify your install
+
+```bash
+curl http://127.0.0.1:8000/api/health
+# {"ingest_connected":true,"ingest_is_sim":true,"sim_mode":true,...}
+```
+
+`ingest_connected: false` means the simulator/drone is not connected yet —
+start with `--sim` if you expected one.
+
+---
+
+## Mission reports & downloads
+
+At the end of every mission the dashboard POSTs the debrief to `POST /api/report`
+with **no operator input**. The backend writes three files into `logs/`
+(git-ignored, one triplet per run):
+
+| File | Contents |
+| --- | --- |
+| `mission-report-<ts>.json` | outcome, time, explored %, distance, battery, survivor list with grid cells |
+| `mission-report-<ts>.pdf` | printable A4 debrief: stats table, survivor roster, final map |
+| `mission-map-<ts>.png` | final occupancy map snapshot |
+
+**From the UI:** the debrief overlay's **DOWNLOAD DEBRIEF** section has three
+buttons — `PDF`, `JSON`, `Map PNG`. They work during replay too, and always
+fetch the newest saved report.
+
+**From HTTP** (same data, useful for scripts):
+
+| Endpoint | Returns |
+| --- | --- |
+| `POST /api/report` | dashboard auto-save (report JSON + map PNG data URL) |
+| `GET /api/report/pdf` | newest debrief PDF, `Content-Disposition: attachment` |
+| `GET /api/report/json` | newest report JSON |
+| `GET /api/report/map` | newest map PNG |
+| `GET /api/logs` | list of raw mission JSONL recordings |
+| `GET /api/logs/<name>` | download one recording (replay input) |
+
+Missing artefacts answer `404 {"detail": "…"}` instead of failing.
 
 ---
 
@@ -123,6 +225,7 @@ LICENSE                 proprietary license (all rights reserved)
 SECURITY.md             security policy + deployment hardening
 backend/
   app/main.py           FastAPI: /ingest, /ws, /api/*, static SPA
+  app/report_pdf.py     debrief PDF renderer (reportlab, offline)
   sim/run.py            drone simulator state machine, motion, sensors
   sim/explore.py        frontier exploration on the native 0.1 m grid
   sim/arena.py          arena, walls, survivors, line of sight
@@ -206,6 +309,26 @@ so a survivor at `(4.2, 1.3)` with `cell_size_m = 1.0` is `E2`.
 - `max_flight_s` — mission clock limit (30:00); drives the timer ring and warnings.
 - `setup_s` — local pre-flight countdown on the setup screen (no drone command).
 - `map_res_m` — occupancy map resolution.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `'python' is not recognized` / `command not found: python` | Windows: use `py -3`. macOS/Linux: use `python3`. |
+| `ModuleNotFoundError: No module named 'fastapi'` | The virtualenv is not active — run `.venv\Scripts\activate` (Windows) or `source .venv/bin/activate`, then reinstall `requirements.txt`. |
+| Page says `frontend not built` or is blank | Build the dashboard: `cd frontend && npm install && npm run build`. |
+| `Address already in use` on start | Something owns port 8000: `python run.py --port 8001`, or stop the other instance. |
+| Event log shows `START ignored: no drone connected` | No simulator/drone on `/ingest` — start with `python run.py --sim`. |
+| `RESET SIM` refuses or times out | Run with `--sim`, and abort the mission first (reset is blocked while airborne). |
+| Video tile stays black | The MJPEG camera server is at `config.json → video_url` (port 8081). Check no other process holds that port. |
+| `npm ci` / `npm install` fails with `ENOSPC` | Your disk is full — free space and retry. |
+| Windows Firewall prompt on first run | Allow Python only on a private network; keep `--host 127.0.0.1` unless the drone needs the LAN. |
+| Report buttons say `no PDF report saved yet` | Finish a mission first (the debrief saves on `EXITED` / `ABORTED` / `FAILSAFE`), or check `logs/`. |
+| Dashboard connects but nothing updates | Check `/api/health` — `last_msg_age_ms` growing means the ingest link stopped. |
+
+---
 
 ## Safety / competition rules
 

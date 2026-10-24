@@ -13,6 +13,42 @@ import { cellLabel } from '../lib/grid'
 import { exportFinalMap } from '../lib/mapExport'
 import { isReplay } from '../lib/replay'
 
+// Fetch a saved artefact from the backend and hand it to the browser's
+// download manager. The backend answers with Content-Disposition: attachment,
+// so the server-side file name is reused when present.
+async function fetchAttachment(url: string, fallbackName: string): Promise<void> {
+  const res = await fetch(url)
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`
+    try {
+      const body = (await res.json()) as { detail?: string }
+      if (body.detail) detail = body.detail
+    } catch {
+      // non-JSON error body; keep the status text
+    }
+    throw new Error(detail)
+  }
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  const match = /filename="?([^";]+)"?/i.exec(disposition)
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = match?.[1] ?? fallbackName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(href), 10_000)
+}
+
+const DOWNLOADS = {
+  pdf: { url: '/api/report/pdf', name: 'mission-debrief.pdf', label: 'PDF' },
+  json: { url: '/api/report/json', name: 'mission-report.json', label: 'JSON' },
+  map: { url: '/api/report/map', name: 'mission-map.png', label: 'Map PNG' },
+} as const
+
+type DownloadKind = keyof typeof DOWNLOADS
+
 function fmt(s: number): string {
   const t = Math.max(0, Math.floor(s))
   return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
@@ -28,6 +64,9 @@ export default function MissionEndOverlay() {
   const [reportState, setReportState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle')
   const sentRef = useRef(false)
 
+  const [downloading, setDownloading] = useState<DownloadKind | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+
   const [confirmReset, setConfirmReset] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
@@ -42,6 +81,8 @@ export default function MissionEndOverlay() {
     if (!active) {
       sentRef.current = false
       setReportState('idle')
+      setDownloadError(null)
+      setDownloading(null)
       setConfirmReset(false)
       setResetting(false)
       setResetError(null)
@@ -91,6 +132,18 @@ export default function MissionEndOverlay() {
   )
 
   if (!active) return null
+
+  const doDownload = (kind: DownloadKind) => {
+    if (downloading) return
+    setDownloading(kind)
+    setDownloadError(null)
+    const target = DOWNLOADS[kind]
+    fetchAttachment(target.url, target.name)
+      .catch((err: unknown) => {
+        setDownloadError(err instanceof Error ? err.message : 'download failed')
+      })
+      .finally(() => setDownloading(null))
+  }
 
   const found = Object.values(survivors).sort((a, b) => a.id - b.id)
   const aborted = state === 'ABORTED'
@@ -210,6 +263,27 @@ export default function MissionEndOverlay() {
                   : 'idle'}
           </span>
           <span>final map PNG + JSON auto-saved</span>
+        </div>
+
+        <div className="mt-4">
+          <div className="micro mb-2">DOWNLOAD DEBRIEF</div>
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(DOWNLOADS) as DownloadKind[]).map((kind) => (
+              <button
+                key={kind}
+                type="button"
+                onClick={() => doDownload(kind)}
+                disabled={downloading !== null}
+                className="btn border-ok/60 bg-ok/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-ok disabled:opacity-50"
+              >
+                {downloading === kind ? 'Preparing…' : DOWNLOADS[kind].label}
+              </button>
+            ))}
+          </div>
+          <div className="micro mt-2 text-[9px]">
+            saved server-side in logs/ · downloads work in replay mode too
+          </div>
+          {downloadError && <div className="mt-2 text-xs text-crit">{downloadError}</div>}
         </div>
 
         <div className="mt-4 rounded-[12px] border border-border/70 bg-black/25 px-4 py-3">
